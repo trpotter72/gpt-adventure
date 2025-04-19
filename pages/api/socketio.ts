@@ -20,6 +20,8 @@ let worldState = {
 // Stock market simulation variables
 let stockValue = 100;
 let lastStockValue = 100;
+// Impulse for buy/sell events
+let impulse = 0;
 const mu = 100;
 const theta = 0.05;
 const alpha = 0.1;
@@ -45,9 +47,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
       const noise = randomNormal() * sigma;
       const deltaMean = theta * (mu - stockValue);
       const deltaTrend = alpha * (stockValue - lastStockValue);
-      const newValue = stockValue + deltaMean + deltaTrend + noise;
+      const newValue = stockValue + deltaMean + deltaTrend + noise + impulse;
       lastStockValue = stockValue;
       stockValue = Math.max(newValue, 0);
+      // Decay impulse over time
+      impulse *= 0.9;
       io.emit('stockUpdate', { stockValue });
     }, 1000);
 
@@ -62,7 +66,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         io.emit('gameStart', { worldState });
         // Send initial players list and first turn
         io.emit('playersUpdate', {
-          players: turnQueue.map(id => ({ id, name: players[id].name })),
+          players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })),
           currentTurn: turnQueue[0]
         });
         // Notify the first player it's their turn
@@ -75,7 +79,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         // Initialize new player with default cash and no shares
         players[socket.id] = { name, money: 1000, inventory: 0 };
         turnQueue.push(socket.id);
-        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name })), currentTurn: turnQueue[0] });
+        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })), currentTurn: turnQueue[0] });
         // Send initial portfolio to the joining player
         socket.emit('portfolioUpdate', { money: players[socket.id].money, inventory: players[socket.id].inventory });
         if (turnQueue.length === 1) io.to(socket.id).emit('yourTurn');
@@ -114,7 +118,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         const current = turnQueue.shift()!;
         turnQueue.push(current);
         const next = turnQueue[0];
-        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name })), currentTurn: next });
+        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })), currentTurn: next });
         io.to(next).emit('yourTurn');
       });
 
@@ -124,8 +128,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         if (players[socket.id].money >= cost) {
           players[socket.id].money -= cost;
           players[socket.id].inventory += qty;
+          // Add positive impulse for buy
+          impulse += qty * 0.5;
         }
         socket.emit('portfolioUpdate', { money: players[socket.id].money, inventory: players[socket.id].inventory });
+        // Broadcast updated portfolio money to all clients
+        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })), currentTurn: turnQueue[0] });
       });
 
       // Handle selling stocks
@@ -133,8 +141,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         if (players[socket.id].inventory >= qty) {
           players[socket.id].inventory -= qty;
           players[socket.id].money += qty * stockValue;
+          // Add negative impulse for sell
+          impulse -= qty * 0.5;
         }
         socket.emit('portfolioUpdate', { money: players[socket.id].money, inventory: players[socket.id].inventory });
+        // Broadcast updated portfolio money to all clients
+        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })), currentTurn: turnQueue[0] });
       });
 
       socket.on('disconnect', () => {
@@ -142,7 +154,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         const idx = turnQueue.indexOf(socket.id);
         if (idx !== -1) turnQueue.splice(idx, 1);
         delete players[socket.id];
-        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name })), currentTurn: turnQueue[0] });
+        io.emit('playersUpdate', { players: turnQueue.map(id => ({ id, name: players[id].name, money: players[id].money })), currentTurn: turnQueue[0] });
       });
     });
   }

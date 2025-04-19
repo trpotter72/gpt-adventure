@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, FormEvent } from "react";
 import io, { Socket } from "socket.io-client";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 export default function Home() {
 
@@ -12,7 +13,7 @@ export default function Home() {
   const [joined, setJoined] = useState<boolean>(false);
   const [gameStarted, setGameStarted] = useState<boolean>(false);
   // Game state
-  const [players, setPlayers] = useState<{ id: string; name: string }[]>([]);
+  const [players, setPlayers] = useState<{ id: string; name: string; money: number }[]>([]);
   const [currentTurn, setCurrentTurn] = useState<string>("");
   // Shared world state including stats
   const [worldState, setWorldState] = useState<{
@@ -32,9 +33,9 @@ export default function Home() {
 
   // Stock and portfolio state
   const [stockValue, setStockValue] = useState<number>(0);
+  const [stockHistory, setStockHistory] = useState<{ time: string; value: number }[]>([]);
   const [money, setMoney] = useState<number>(0);
   const [stockInventory, setStockInventory] = useState<number>(0);
-  const [tradeQty, setTradeQty] = useState<string>("");
 
   // Initialize Socket.IO
   useEffect(() => {
@@ -56,7 +57,10 @@ export default function Home() {
     });
 
     // Listen for stock updates
-    newSocket.on('stockUpdate', ({ stockValue }) => setStockValue(stockValue));
+    newSocket.on('stockUpdate', ({ stockValue }) => {
+      setStockValue(stockValue);
+      setStockHistory(prev => [...prev.slice(-19), { time: new Date().toLocaleTimeString(), value: stockValue }]);
+    });
     // Listen for portfolio updates
     newSocket.on('portfolioUpdate', ({ money, inventory }) => {
       setMoney(money);
@@ -97,20 +101,8 @@ export default function Home() {
   };
 
   // Handlers for trading
-  const handleBuyStock = () => {
-    const qty = parseInt(tradeQty, 10);
-    if (socket && qty > 0) {
-      socket.emit('buyStock', qty);
-      setTradeQty("");
-    }
-  };
-  const handleSellStock = () => {
-    const qty = parseInt(tradeQty, 10);
-    if (socket && qty > 0) {
-      socket.emit('sellStock', qty);
-      setTradeQty("");
-    }
-  };
+  const handleBuyOne = () => { if (socket) socket.emit('buyStock', 1); };
+  const handleSellOne = () => { if (socket) socket.emit('sellStock', 1); };
 
   const otherPlayers = players.filter(p => p.id !== socketId);
 
@@ -174,32 +166,29 @@ export default function Home() {
               <div><span className="font-bold">Shares:</span> {stockInventory}</div>
             </div>
           </div>
+          {/* Stock Value Bar Chart */}
+          <BarChart width={600} height={200} data={stockHistory} className="mx-auto mb-4">
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="time" />
+            <YAxis domain={[dataMin => Math.floor(dataMin - 5), dataMax => Math.ceil(dataMax + 5)]} />
+            <Tooltip />
+            <Bar dataKey="value" fill="#8884d8" />
+          </BarChart>
           {/* Trading Controls */}
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="number"
-              value={tradeQty}
-              onChange={(e) => setTradeQty(e.target.value)}
-              placeholder="Qty"
-              className="w-20 px-2 py-1 border rounded-md"
-            />
-            <button onClick={handleBuyStock} className="px-3 py-1 bg-green-600 text-white rounded-md hover:opacity-90">
-              Buy
+          <div className="flex items-center gap-4 mb-4 justify-center">
+            <button onClick={handleBuyOne} className="px-4 py-2 bg-green-600 text-white rounded-md hover:opacity-90">
+              Buy 1 Share
             </button>
-            <button onClick={handleSellStock} className="px-3 py-1 bg-red-600 text-white rounded-md hover:opacity-90">
-              Sell
+            <button onClick={handleSellOne} className="px-4 py-2 bg-red-600 text-white rounded-md hover:opacity-90">
+              Sell 1 Share
             </button>
           </div>
           <div className="mb-4">
             <div className="font-semibold">Players:</div>
             <ul className="list-disc pl-5">
               {players.map((p) => (
-                <li
-                  key={p.id}
-                  className={p.id === currentTurn ? "font-bold" : ""}
-                >
-                  {p.name}
-                  {p.id === currentTurn ? " (Current Turn)" : ""}
+                <li key={p.id} className={p.id === currentTurn ? "font-bold" : ""}>
+                  {p.name} (${p.money}){p.id === currentTurn ? " (Current Turn)" : ""}
                 </li>
               ))}
             </ul>
