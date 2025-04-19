@@ -22,7 +22,7 @@ export default function Home() {
     },
     messages: [],
     currentPrompt:
-      "You wake up in a mysterious forest. The air is thick with mist, and you can hear strange sounds in the distance. What do you do?",
+      "You wake up on ocean beach. It's morning, and the sun is just starting to rise. You know what you must do. Marc Benioff must fall; you must become CEO of Salesforce.",
     history: [],
   });
 
