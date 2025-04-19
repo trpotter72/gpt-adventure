@@ -5,7 +5,11 @@ import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 dotenv.config();
 
-// This is the endpoint that handles the game's interaction with ChatGPT
+/**
+ * Handles POST requests for the text adventure game route.
+ * @param request - The NextRequest containing gameState and userInput.
+ * @returns NextResponse with game outcome JSON.
+ */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -43,11 +47,7 @@ export async function POST(request: NextRequest) {
     // Extract the probability value
     const probabilityString =
       probabilityResponse.choices[0].message.content || "50";
-    const successProbability =
-      Math.min(
-        Math.max(parseInt(probabilityString.replace(/\D/g, ""), 10) || 50, 1),
-        99
-      ) / 100;
+    const successProbability = parseSuccessProbability(probabilityString);
 
     // Use RNG to determine success or failure
     const randomValue = Math.random();
@@ -118,15 +118,24 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper function to format the history for ChatGPT
-function formatHistoryForChatGPT(gameState: any): any[] {
+/**
+ * Formats the game history into ChatCompletionMessageParam objects for OpenAI.
+ *
+ * @param gameState - The current game state including history and current prompt.
+ * @returns An array of messages for the OpenAI chat API.
+ */
+export function formatHistoryForChatGPT(gameState: any): any[] {
   const messages = [];
 
   // Add the initial prompt as the assistant's first message
   if (gameState.currentPrompt) {
     messages.push({
       role: "assistant",
-      content: `{"story": "The adventure begins.", "prompt": "${gameState.currentPrompt}", "statsUpdate": {}}`,
+      content: JSON.stringify({
+        story: "The adventure begins.",
+        prompt: gameState.currentPrompt,
+        statsUpdate: {}
+      }),
     });
   }
 
@@ -163,4 +172,16 @@ function formatHistoryForChatGPT(gameState: any): any[] {
   }
 
   return messages;
+}
+
+/**
+ * Parses a probability string returned by OpenAI and clamps it between 1% and 99%.
+ * @param probabilityString - The raw string containing a numeric percentage.
+ * @returns A number between 0.01 and 0.99.
+ */
+export function parseSuccessProbability(probabilityString: string): number {
+  const parsed = parseInt(probabilityString.replace(/\D/g, ''), 10);
+  const num = isNaN(parsed) ? 50 : parsed;
+  const clamped = Math.min(Math.max(num, 1), 99);
+  return clamped / 100;
 }

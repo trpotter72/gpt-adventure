@@ -1,179 +1,257 @@
 "use client";
 
-import { useState, FormEvent, useRef, useEffect } from "react";
-
-type GameState = {
-  stats: {
-    STR: number;
-    DEF: number;
-    HP: number;
-  };
-  messages: string[];
-  currentPrompt: string;
-  history: string[];
-};
+import { useState, useEffect, useRef, FormEvent } from "react";
+import io, { Socket } from "socket.io-client";
 
 export default function Home() {
-  const [gameState, setGameState] = useState<GameState>({
-    stats: {
-      STR: 10,
-      DEF: 10,
-      HP: 100,
-    },
-    messages: [],
-    currentPrompt:
-      "You wake up on ocean beach. It's morning, and the sun is just starting to rise. You know what you must do. Marc Benioff must fall; you must become CEO of Salesforce.",
-    history: [],
-  });
 
-  const [inputText, setInputText] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  // State for Socket.IO and player
+  const [socket, setSocket] = useState<Socket>();
+  const [socketId, setSocketId] = useState<string>("");
+  const [playerName, setPlayerName] = useState<string>("");
+  const [joined, setJoined] = useState<boolean>(false);
+  const [gameStarted, setGameStarted] = useState<boolean>(false);
+  // Game state
+  const [players, setPlayers] = useState<{ id: string; name: string }[]>([]);
+  const [currentTurn, setCurrentTurn] = useState<string>("");
+  // Shared world state including stats
+  const [worldState, setWorldState] = useState<{
+    story: string;
+    stats: { STR: number; DEF: number; HP: number };
+    inventory: string[];
+    money: number;
+  }>({
+    story: "You wake up on ocean beach. It's morning, and the sun is just starting to rise. You know what you must do. Marc Benioff must fall; you must become CEO of Salesforce.",
+    stats: { STR: 10, DEF: 10, HP: 100 },
+    inventory: [],
+    money: 0,
+  });
+  const [inputText, setInputText] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize game
+  // Stock and portfolio state
+  const [stockValue, setStockValue] = useState<number>(0);
+  const [money, setMoney] = useState<number>(0);
+  const [stockInventory, setStockInventory] = useState<number>(0);
+  const [tradeQty, setTradeQty] = useState<string>("");
+
+  // Initialize Socket.IO
   useEffect(() => {
-    setGameState((prevState) => ({
-      ...prevState,
-      messages: [`PROMPT: ${prevState.currentPrompt}`],
-    }));
-  }, []);
-
-  // Scroll to bottom of messages whenever they update
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [gameState.messages]);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-
-    if (!inputText.trim() || isLoading) return;
-
-    // Add user input to messages
-    const updatedMessages = [...gameState.messages, `> ${inputText}`];
-
-    setGameState({
-      ...gameState,
-      messages: updatedMessages,
-      history: [...gameState.history, inputText],
+    // Connect to Socket.IO on Next.js API route
+    const endpoint = typeof window !== 'undefined' ? window.location.origin : '';
+    const newSocket = io(endpoint, { path: '/api/socketio' });
+    setSocket(newSocket);
+    newSocket.on("connect", () => setSocketId(newSocket.id!));
+    newSocket.on("playersUpdate", ({ players, currentTurn }) => {
+      setPlayers(players);
+      setCurrentTurn(currentTurn);
+      setLoading(false);
+    });
+    newSocket.on("stateUpdate", ({ worldState }) => setWorldState(worldState));
+    // Listen for server-triggered game start
+    newSocket.on("gameStart", ({ worldState: initialState }) => {
+      setWorldState(initialState);
+      setGameStarted(true);
     });
 
-    // Reset input field
-    setInputText("");
-    setIsLoading(true);
+    // Listen for stock updates
+    newSocket.on('stockUpdate', ({ stockValue }) => setStockValue(stockValue));
+    // Listen for portfolio updates
+    newSocket.on('portfolioUpdate', ({ money, inventory }) => {
+      setMoney(money);
+      setStockInventory(inventory);
+    });
 
-    try {
-      // Call our API endpoint
-      const response = await fetch("/api/game", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          gameState,
-          userInput: inputText,
-        }),
-      });
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch from API");
-      }
+  // Scroll on story update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [worldState.story]);
 
-      const data = await response.json();
-
-      // Update game state with the response
-      setGameState((prevState) => {
-        const newStats = {
-          ...prevState.stats,
-          ...(data.statsUpdate || {}),
-        };
-
-        return {
-          ...prevState,
-          stats: newStats,
-          messages: [
-            ...prevState.messages,
-            `STORY: ${data.story}`,
-            `PROMPT: ${data.prompt}`,
-          ],
-          currentPrompt: data.prompt,
-          history: [...prevState.history, data.story, data.prompt],
-        };
-      });
-    } catch (error) {
-      console.error("Error:", error);
-      setGameState((prevState) => ({
-        ...prevState,
-        messages: [
-          ...prevState.messages,
-          "There was an error processing your request. Please try again.",
-        ],
-      }));
-    } finally {
-      setIsLoading(false);
+  const handleJoin = (e: FormEvent) => {
+    e.preventDefault();
+    if (socket && playerName.trim()) {
+      socket.emit("join", playerName.trim());
+      setJoined(true);
     }
   };
 
+  const handleStart = () => {
+    // Tell server to start game for everyone
+    socket?.emit("startGame");
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!socket || loading) return;
+    if (socketId === currentTurn && inputText.trim()) {
+      setLoading(true);
+      socket.emit("action", inputText.trim());
+      setInputText("");
+    }
+  };
+
+  // Handlers for trading
+  const handleBuyStock = () => {
+    const qty = parseInt(tradeQty, 10);
+    if (socket && qty > 0) {
+      socket.emit('buyStock', qty);
+      setTradeQty("");
+    }
+  };
+  const handleSellStock = () => {
+    const qty = parseInt(tradeQty, 10);
+    if (socket && qty > 0) {
+      socket.emit('sellStock', qty);
+      setTradeQty("");
+    }
+  };
+
+  const otherPlayers = players.filter(p => p.id !== socketId);
+
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col p-4 max-w-4xl mx-auto">
+    <div className="min-h-screen p-4 max-w-4xl mx-auto flex flex-col">
       <header className="text-2xl font-bold mb-4 text-center">
         ChatGPT Adventure
       </header>
-
-      {/* Stats Display */}
-      <div className="flex justify-between mb-4 bg-black/10 dark:bg-white/10 p-3 rounded-md">
-        <div className="stat">
-          <span className="font-bold">STR:</span> {gameState.stats.STR}
-        </div>
-        <div className="stat">
-          <span className="font-bold">DEF:</span> {gameState.stats.DEF}
-        </div>
-        <div className="stat">
-          <span className="font-bold">HP:</span> {gameState.stats.HP}
-        </div>
-      </div>
-
-      {/* Game Output */}
-      <div className="flex-1 overflow-auto mb-4 bg-black/5 dark:bg-white/5 p-4 rounded-md font-mono text-sm min-h-[300px] max-h-[60vh]">
-        {gameState.messages.map((message, index) => (
-          <div
-            key={index}
-            className={`mb-2 ${
-              message.startsWith(">")
-                ? "text-blue-600 dark:text-blue-400"
-                : message.startsWith("STORY:")
-                ? "text-green-600 dark:text-green-400 font-semibold"
-                : message.startsWith("PROMPT:")
-                ? "text-purple-600 dark:text-purple-400 font-semibold"
-                : ""
-            }`}
+      {!joined ? (
+        <form onSubmit={handleJoin} className="flex gap-2">
+          <input
+            type="text"
+            value={playerName}
+            onChange={(e) => setPlayerName(e.target.value)}
+            placeholder="Your name"
+            className="flex-1 px-3 py-2 border rounded-md"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-foreground text-background rounded-md hover:opacity-90"
           >
-            {message}
+            Join Game
+          </button>
+        </form>
+      ) : !gameStarted ? (
+        <div>
+          <div className="mb-4">
+            <div className="font-semibold">Players in Lobby:</div>
+            <ul className="list-disc pl-5">
+              {players.map(p => (
+                <li key={p.id}>{p.name}{p.id === socketId ? ' (You)' : ''}</li>
+              ))}
+            </ul>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          className="flex-1 px-3 py-2 border rounded-md bg-transparent border-black/20 dark:border-white/20 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="What do you want to do?"
-          disabled={isLoading}
-          autoFocus
-        />
-        <button
-          type="submit"
-          className={`px-4 py-2 bg-foreground text-background rounded-md ${
-            isLoading ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"
-          }`}
-          disabled={isLoading}
-        >
-          {isLoading ? "Thinking..." : "Submit"}
-        </button>
-      </form>
+          {otherPlayers.length > 0 && (
+            <div className="mb-4">
+              <div className="font-semibold">Other Players:</div>
+              <ul className="list-disc pl-5">
+                {otherPlayers.map(p => <li key={p.id}>{p.name}</li>)}
+              </ul>
+            </div>
+          )}
+          <div className="mb-4">
+            <div className="font-semibold">Current Prompt:</div>
+            <div className="p-4 bg-black/5 rounded-md font-mono">{worldState.story.split('\n')[0]}</div>
+          </div>
+          <button onClick={handleStart} className="px-4 py-2 bg-foreground text-background rounded-md hover:opacity-90">
+            Start Game
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Shared Stats and Stock Display */}
+          <div className="grid grid-cols-4 gap-4 mb-4 bg-black/10 dark:bg-white/10 p-3 rounded-md">
+            <div><span className="font-bold">STR:</span> {worldState.stats.STR}</div>
+            <div><span className="font-bold">DEF:</span> {worldState.stats.DEF}</div>
+            <div><span className="font-bold">HP:</span> {worldState.stats.HP}</div>
+            <div>
+              <div><span className="font-bold">Stock Value:</span> {stockValue.toFixed(2)}</div>
+              <div><span className="font-bold">Cash:</span> {money}</div>
+              <div><span className="font-bold">Shares:</span> {stockInventory}</div>
+            </div>
+          </div>
+          {/* Trading Controls */}
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="number"
+              value={tradeQty}
+              onChange={(e) => setTradeQty(e.target.value)}
+              placeholder="Qty"
+              className="w-20 px-2 py-1 border rounded-md"
+            />
+            <button onClick={handleBuyStock} className="px-3 py-1 bg-green-600 text-white rounded-md hover:opacity-90">
+              Buy
+            </button>
+            <button onClick={handleSellStock} className="px-3 py-1 bg-red-600 text-white rounded-md hover:opacity-90">
+              Sell
+            </button>
+          </div>
+          <div className="mb-4">
+            <div className="font-semibold">Players:</div>
+            <ul className="list-disc pl-5">
+              {players.map((p) => (
+                <li
+                  key={p.id}
+                  className={p.id === currentTurn ? "font-bold" : ""}
+                >
+                  {p.name}
+                  {p.id === currentTurn ? " (Current Turn)" : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="flex gap-4 mb-4">
+            <div className="flex-1 overflow-auto bg-black/5 p-4 rounded-md font-mono text-sm max-h-[60vh]">
+              {worldState.story.split("\n").map((line, i) => (
+                <div key={i} className="mb-2">
+                  {line}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <div className="w-48 bg-black/10 p-4 rounded-md">
+              <div>
+                <span className="font-semibold">Inventory:</span>
+              </div>
+              <ul className="list-disc pl-5">
+                {worldState.inventory.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+              <div className="mt-2">
+                <span className="font-semibold">Money:</span> {worldState.money}
+              </div>
+            </div>
+          </div>
+          <form onSubmit={handleSubmit} className="flex gap-2">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={
+                socketId === currentTurn
+                  ? "What do you want to do?"
+                  : "Waiting for your turn..."
+              }
+              disabled={socketId !== currentTurn || loading}
+              className="flex-1 px-3 py-2 border rounded-md bg-transparent"
+            />
+            <button
+              type="submit"
+              className={`px-4 py-2 bg-foreground text-background rounded-md ${
+                loading ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"
+              }`}
+              disabled={socketId !== currentTurn || loading}
+            >
+              {loading ? "Thinking..." : "Submit"}
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }

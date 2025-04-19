@@ -1,74 +1,83 @@
-# ChatGPT Adventure Game
+# GPT Adventure
 
-A text adventure game powered by ChatGPT. Players input natural language descriptions of their actions, and the AI responds with story progression and prompts for the next action.
+An interactive text adventure game powered by OpenAI's GPT API and Next.js.
 
-## Features
-
-- Interactive text adventure gameplay
-- Natural language input processing
-- Dynamic story progression based on player actions
-- Character stats that evolve based on gameplay decisions
-- ChatGPT integration for rich, contextual responses
+## Table of Contents
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [API Documentation](#api-documentation)
+- [Helper Functions](#helper-functions)
+- [Testing](#testing)
 
 ## Getting Started
 
-First, clone the repository and install dependencies:
+Install dependencies:
 
 ```bash
-git clone <repository-url>
-cd gpt-adventure
-yarn install
+npm install
 ```
 
-### Configure OpenAI API
-
-1. Copy the `.env.local` file and add your OpenAI API key:
-
+Run the development server:
 ```bash
-cp .env.local.example .env.local
+npm run dev
 ```
 
-2. Edit `.env.local` with your actual OpenAI API key:
+## Configuration
 
+Create a `.env.local` file in the project root with:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
 ```
-OPENAI_API_KEY=your_openai_api_key_here
+
+## API Documentation
+
+### POST /api/game
+
+Handles text adventure game interactions.
+
+Request Body (JSON):
+```json
+{  
+  "gameState": {
+    "currentPrompt": "string",
+    "history": ["string"],
+    "stats": {"STR": number, "DEF": number, "HP": number}
+  },
+  "userInput": "string"
+}
 ```
 
-3. Uncomment and configure the OpenAI API integration in `app/api/game/route.ts`
+Response Body (JSON):
+```json
+{
+  "story": "string",
+  "prompt": "string",
+  "statsUpdate": { [stat: string]: number },
+  "actionSucceeded": boolean,
+  "successProbability": number
+}
+```
 
-### Run the development server
+## Helper Functions
 
+- **formatHistoryForChatGPT(gameState)**: Transforms game history and current prompt into an array of `ChatCompletionMessageParam` objects for OpenAI.
+- **parseSuccessProbability(probabilityString)**: Parses a raw probability string from the OpenAI response and clamps it between 1% and 99% (returned as a float between 0.01 and 0.99).
+
+## Testing
+
+This project uses Jest with `ts-jest` for unit testing.
+
+### Running Tests
 ```bash
-yarn dev
+npm test
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to play the game.
+### Test Files
+- `__tests__/gameHelpers.test.ts`: Unit tests for helper functions.
 
-## How to Play
-
-1. Read the current game prompt
-2. Type your action in natural language (e.g., "I search the room for hidden items")
-3. The AI will respond with what happens and present you with a new situation
-4. Your character stats will change based on your actions
-
-## Game Mechanics
-
-- **STR (Strength)**: Affects combat ability and physical tasks
-- **DEF (Defense)**: Affects damage reduction and ability to avoid harm
-- **HP (Health Points)**: Your character's health - if it reaches zero, the game ends
-
-## Customization
-
-The game can be customized by modifying the system prompt in `app/api/game/route.ts` to create different gameplay experiences or change the theme of the adventure.
-
-## Technologies Used
-
-- Next.js 15+
-- React 19+
-- OpenAI API (GPT-4 or similar model)
-- TypeScript
-- Tailwind CSS
-
-## License
-
-MIT
+### Coverage
+Test coverage reports can be generated with:
+```bash
+npm test -- --coverage
+```
